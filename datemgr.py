@@ -1,352 +1,104 @@
-"""
-    The MIT License (MIT)
+import datetime as dt
+from dateutil.relativedelta import relativedelta
+from dateutil.parser import parse
+from dateutil import rrule
+from nsetools.errors import DateFormatError
 
-    Copyright (c) 2014 Vivek Jha
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
+def get_nearest_business_day(d):
+    """ takes datetime object"""
+    if d.isoweekday() == 7 or d.isoweekday() == 6:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
 
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
+    # republic day
+    elif d.month == 1 and d.day == 26:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
+    # labour day
+    elif d.month == 5 and d.day == 1:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
+    # independece day
+    elif d.month == 8 and d.day == 15:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
+    # Gandhi Jayanti
+    elif d.month == 10 and d.day == 2:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
+    # chirstmas
+    elif d.month == 12 and d.day == 25:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
+    else:
+        return d
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
-
-"""
-import ast 
-import re
-import json
-import zipfile
-import io
-import requests
-from typing import Optional
-from dateutil import parser
-from datetime import datetime as dt 
-from nsetools.bases import AbstractBaseExchange
-from nsetools.datemgr import mkdate
-
-class Nse(AbstractBaseExchange):
-    """
-    class which implements all the functionality for
-    National Stock Exchange
-    """
-    __CODECACHE__ = None
-
-    def __init__(self, verify: bool = True, session_refresh_interval: int = 300):
-        # URL list
-        self.session_refresh_interval = session_refresh_interval 
-        self.session = self.create_session(verify=verify)
-        
-        self.get_quote_url = "https://www.nseindia.com/get-quotes/equity?symbol={code}"
-        self.stocks_csv_url = 'http://www1.nseindia.com/content/equities/EQUITY_L.csv'
-        self.top_gainer_url = 'http://www1.nseindia.com/live_market/dynaContent/live_analysis/gainers/niftyGainers1.json'
-        self.top_loser_url = 'http://www1.nseindia.com/live_market/dynaContent/live_analysis/losers/niftyLosers1.json'
-        self.top_fno_gainer_url = 'https://www1.nseindia.com/live_market/dynaContent/live_analysis/gainers/fnoGainers1.json'
-        self.top_fno_loser_url = 'https://www1.nseindia.com/live_market/dynaContent/live_analysis/losers/fnoLosers1.json'
-        self.advances_declines_url = 'http://www1.nseindia.com/common/json/indicesAdvanceDeclines.json'
-        self.index_url = "http://www1.nseindia.com/homepage/Indices1.json"
-        self.bhavcopy_base_url = "https://www1.nseindia.com/content/historical/EQUITIES/%s/%s/cm%s%s%sbhav.csv.zip"
-        self.bhavcopy_base_filename = "cm%s%s%sbhav.csv"
-        self.active_equity_monthly_url = "https://www1.nseindia.com/products/dynaContent/equities/equities/json/mostActiveMonthly.json"
-        self.year_high_url = "https://www1.nseindia.com/products/dynaContent/equities/equities/json/online52NewHigh.json"
-        self.year_low_url = "https://www1.nseindia.com/products/dynaContent/equities/equities/json/online52NewLow.json"
-        self.preopen_nifty_url = "https://www1.nseindia.com/live_market/dynaContent/live_analysis/pre_open/nifty.json"
-        self.preopen_fno_url = "https://www1.nseindia.com/live_market/dynaContent/live_analysis/pre_open/fo.json"
-        self.preopen_niftybank_url = "https://www1.nseindia.com/live_market/dynaContent/live_analysis/pre_open/niftybank.json"
-        self.fno_lot_size_url = "https://www1.nseindia.com/content/fo/fo_mktlots.csv"
-
-    def get_fno_lot_sizes(self, cached=True, as_json=False):
-        """
-        returns a dictionary with key as stock code and value as stock name.
-        It also implements cache functionality and hits the server only
-        if user insists or cache is empty
-        :return: dict
-        """
-        url = self.fno_lot_size_url
-        res_dict = {}
-        if cached is not True or self.__CODECACHE__ is None:
-            res = self.session.get(url)
-            res.raise_for_status()
-            data = res.text
-            for line in data.split('\n'):
-                if line != '' and re.search(',', line) and (line.casefold().find('symbol') == -1):
-                    (code, name) = [x.strip() for x in line.split(',')[1:3]]
-                    res_dict[code] = int(name)
-            self.__CODECACHE__ = res_dict
-        return self.render_response(self.__CODECACHE__, as_json)
-
-    def get_stock_codes(self, cached=True, as_json=False):
-        """
-        returns a dictionary with key as stock code and value as stock name.
-        It also implements cache functionality and hits the server only
-        if user insists or cache is empty
-        :return: dict
-        """
-        url = self.stocks_csv_url
-        res_dict = {}
-        if cached is not True or self.__CODECACHE__ is None:
-            res = self.session.get(url)
-            res.raise_for_status()
-            data = res.text
-            for line in data.split('\n'):
-                if line != '' and re.search(',', line):
-                    (code, name) = line.split(',')[0:2]
-                    res_dict[code] = name
-            self.__CODECACHE__ = res_dict
-        return self.render_response(self.__CODECACHE__, as_json)
-
-    def is_valid_code(self, code):
-        """
-        :param code: a string stock code
-        :return: Boolean
-        """
-        if code:
-            stock_codes = self.get_stock_codes()
-            if code.upper() in stock_codes.keys():
-                return True
-            else:
-                return False
-
-    def get_quote(self, code, all_data=False):
-        """
-        gets the quote for a given stock code
-        :param code:
-        :return: dict or None
-        :raises: HTTPError
-        """
-        code = code.upper()
-        res = self.fetch(f"https://www.nseindia.com/api/quote-equity?symbol={code}")
-        res.raise_for_status()
-        return res.json()['priceInfo'] if all_data is False else res.json()
-    
-    def get_top_gainers(self, as_json=False):
-        """
-        :return: a list of dictionaries containing top gainers of the day
-        """
-        url = self.top_gainer_url
-        res = self.session.get(url)
-        res.raise_for_status()
-        data = res.json()
-        res_list = [self.clean_server_response(item) for item in data['data']]
-        return self.render_response(res_list, as_json)
-
-    def get_top_losers(self, as_json=False):
-        """
-        :return: a list of dictionaries containing top losers of the day
-        """
-        url = self.top_loser_url
-        res = self.session.get(url)
-        res.raise_for_status()
-        data = res.json()
-        res_list = [self.clean_server_response(item) for item in data['data']]
-        return self.render_response(res_list, as_json)
-
-    def get_top_fno_gainers(self, as_json=False):
-        """
-        :return: a list of dictionaries containing top gainers in fno of the day
-        """
-        url = self.top_fno_gainer_url
-        res = self.session.get(url)
-        res.raise_for_status()
-        data = res.json()
-        res_list = [self.clean_server_response(item) for item in data['data']]
-        return self.render_response(res_list, as_json)
-
-    def get_top_fno_losers(self, as_json=False):
-        """
-        :return: a list of dictionaries containing top losers of the day
-        """
-        url = self.top_fno_loser_url
-        res = self.session.get(url)
-        res.raise_for_status()
-        data = res.json()
-        res_list = [self.clean_server_response(item) for item in data['data']]
-        return self.render_response(res_list, as_json)
-
-    def get_advances_declines(self, as_json=False):
-        """
-        :return: a list of dictionaries with advance decline data
-        :raises: URLError, HTTPError
-        """
-        url = self.advances_declines_url
-        res = self.session.get(url)
-        res.raise_for_status()
-        data = res.json()
-        res_list = [self.clean_server_response(item) for item in data['data']]
-        return self.render_response(res_list, as_json)
-
-    def get_active_monthly(self, as_json=False):
-        return self._get_json_response_from_url(self.active_equity_monthly_url, as_json)
-
-    def get_year_high(self, as_json=False):
-        return self._get_json_response_from_url(self.year_high_url, as_json)
-
-    def get_year_low(self, as_json=False):
-        return self._get_json_response_from_url(self.year_low_url, as_json)
-    
-    def get_preopen_nifty(self, as_json=False):
-        return self._get_json_response_from_url(self.preopen_nifty_url, as_json)
-
-    def get_preopen_niftybank(self, as_json=False):
-        return self._get_json_response_from_url(self.preopen_niftybank_url, as_json)
-
-    def get_preopen_fno(self, as_json=False):
-        return self._get_json_response_from_url(self.preopen_fno_url, as_json)
-
-    def _get_json_response_from_url(self, url, as_json):
-        """
-        :return: a list of dictionaries containing the response got back from url
-        """
-        res = self.session.get(url)
-        res.raise_for_status()
-        data = res.json()
-        res_list = [self.clean_server_response(item) for item in data['data']]
-        return self.render_response(res_list, as_json)
-    
-    def get_index_list(self):
-        """ get list of indices and codes
-        returns: a list | json of index codes
-        """
-        return [i['indexSymbol'] for i in self.get_all_index_quote()]
-    
-    def get_index_quote(self, code):
-        """
-        params:
-            code : string index code
-        returns:
-            dict 
-        """
-        all_index_quote = self.get_all_index_quote()
-        index_list = [i['indexSymbol'] for i in all_index_quote]
-        code = code.upper()
-        if code in index_list:
-            return list(filter(lambda idx: idx['indexSymbol'] == code, all_index_quote))[0]
-        else:
-            raise Exception('Wrong index code')
-    
-    def get_all_index_quote(self):
-        """
-        Gets information of all indices and one go
-        returns:
-            list of dicts
-        """
-        url = "https://www.nseindia.com/api/allIndices"
-        res = self.fetch(url)
-        res.raise_for_status()
-        return res.json()['data']
-
-    def nse_headers(self):
-        """
-        Builds right set of headers for requesting http://nseindia.com
-        :return: a dict with http headers
-        """
-        return {
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.5",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
-            "X-Requested-With": "XMLHttpRequest"
-        }
-
-    def build_url_for_quote(self, code):
-        """
-        builds a url which can be requested for a given stock code
-        :param code: string containing stock code.
-        :return: a url object
-        """
+def is_known_holiday(d):
+    """accepts datetime/date object and returns boolean"""
+    if type(d) == dt.datetime:
+        d = d.date()
+    elif type(d) != dt.date:
+        raise DateFormatError("only date objects or datetime objects")
+    else:
+        # fine do nothing
         pass 
 
-    def clean_server_response(self, resp_dict):
-        """cleans the server reponse by replacing:
-            '-'     -> None
-            '1,000' -> 1000
-        :param resp_dict:
-        :return: dict with all above substitution
-        """
-        # Implement the cleaning logic here
-        pass 
+    # declare the list of holidays here.
+    # republic day.
+    if d.month  == 1 and d.day == 26:
+        return True
+    # labour day
+    elif d.month == 5 and d.day == 1:
+        d = d - relativedelta(days=1)
+        return get_nearest_business_day(d)
+    # independence day
+    elif d.month == 8 and d.day == 15:
+        return True
+    # gandhi jayanti
+    elif d.month == 10 and d.day == 2:
+        return True
+    # christmas
+    elif d.month == 12 and d.day == 25:
+        return True
+    else:
+        return False
 
-    def render_response(self, data, as_json=False):
-        if as_json:
-            return json.dumps(data)
+def mkdate(d):
+    """tries its best to return a valid date. it can accept pharse like today,
+    yesterday, day before yesterday etc. 
+    """
+    # check if the it == a string
+    return_date = ""
+    if type(d) is str:
+        if d == "today":
+            return_date = dt.date.today()
+        elif d == "yesterday":
+            return_date = dt.date.today() - relativedelta(days=1)
+        elif d == "day before yesterday":
+            return_date = dt.date.today() - relativedelta(days=2)
         else:
-            return data
+            return_date = parse(d, dayfirst=True).date()
+    elif type(d) == dt.datetime:
+        return_date = d.date()
+    elif type(d) == dt.date:
+        return d
+    else:
+        raise DateFormatError("wrong date format %s" % str(d))
+    # check if future date.
+    return return_date
 
-    def get_bhavcopy_url(self, d):
-        """take date and return bhavcopy url"""
-        d = mkdate(d)
-        day_of_month = d.strftime("%d")
-        mon = d.strftime("%b").upper()
-        year = d.year
-        url = self.bhavcopy_base_url % (year, mon, day_of_month, mon, year)
-        return url
+def usable_date(d):
+    """accepts fuzzy format and returns most sensible date"""
+    return get_nearest_business_day(mkdate(d))
 
-    def get_bhavcopy_filename(self, d):
-        d = mkdate(d)
-        day_of_month = d.strftime("%d")
-        mon = d.strftime("%b").upper()
-        year = d.year
-        filename = self.bhavcopy_base_filename % (day_of_month, mon, year)
-        return filename
-
-    def download_bhavcopy(self, d):
-        """returns bhavcopy as csv file."""
-        url = self.get_bhavcopy_url(d)
-        filename = self.get_bhavcopy_filename(d)
-        res = self.session.get(url)
-        res.raise_for_status()
-        zip_file_handle = io.BytesIO(res.content)
-        zf = zipfile.ZipFile(zip_file_handle)
-        try:
-            result = zf.read(filename)
-        except KeyError:
-            result = zf.read(zf.filelist[0].filename)
-        return result.decode("utf-8")
-    
-    def download_index_copy(self, d):
-        """returns index copy file"""
-        pass
-
-    def create_session(self, verify=True):
-        self._session = requests.Session()
-        self._session.verify = verify
-        self._session.headers.update(self.nse_headers())
-        home_url = "https://nseindia.com"
-        self._session.get(home_url)
-        self._session_init_time = dt.now()
-        return self._session
-
-    def fetch(self, url):
-        time_diff = dt.now() - self._session_init_time
-        if time_diff.seconds < self.session_refresh_interval:
-            return self._session.get(url)
-        else:
-            self.create_session(self._session.verify)
-            return self._session.get(url)
-
-    def __str__(self):
-        """
-        string representation of object
-        :return: string
-        """
-        return 'Driver Class for National Stock Exchange (NSE)'
-
-if __name__ == "__main__":
-    nse = Nse()
-    # data = nse.download_bhavcopy("14th Dec")
-    print(nse.get_quote('reliance'))
-
-# TODO: get_most_active()
-# TODO: get_top_volume()
-# TODO: get_peer_companies()
-# TODO: is_market_open()
-# TODO: concept of portfolio for fetching price in a batch and field which should be captured
-# TODO: Concept of session, just like as in sqlalchemy
+def get_date_range(frm, to, skip_dates=[]):
+    """accepts fuzzy format date and returns business adjusted date ranges"""
+    # for x in rrule.rrule(rrule.DAILY, dtstart=s, until=dt.datetime.now(), byweekday=[0, 1, 2, 3, 4]): print(x)
+    frm = usable_date(frm)
+    to = usable_date(to)
+    datelist = []
+    for date in rrule.rrule(rrule.DAILY, dtstart=frm, until=to, byweekday=[0, 1, 2, 3, 4]):
+        if not is_known_holiday(date):
+            datelist.append(date.date())
+    return datelist
