@@ -25,6 +25,7 @@
 import ast 
 import re
 import json
+import urllib.request
 import zipfile
 import io
 import requests
@@ -48,6 +49,14 @@ class Nse(AbstractBaseExchange):
         # URL list
         self.session_refresh_interval = session_refresh_interval 
         self.session = self.create_session(verify = verify)
+
+        context = None
+        if not verify:
+            context = ssl._create_unverified_context()
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=context)
+        )
+        self.opener.addheaders = [('User-agent', 'Mozilla/5.0')]
         
         self.get_quote_url = "https://www.nseindia.com/get-quotes/equity?symbol={code}"
         self.stocks_csv_url = 'http://www1.nseindia.com/content/equities/EQUITY_L.csv'
