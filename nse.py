@@ -43,10 +43,11 @@ class Nse(AbstractBaseExchange):
     """
     __CODECACHE__ = None
 
-    def __init__(self, session_refresh_interval=300):
+    def __init__(self, session: Optional[requests.Session] = None, session_refresh_interval: int = 300):
         # URL list
         self.session_refresh_interval = session_refresh_interval 
-        self.create_session()
+        self.session = session or self.create_session()
+        
         self.get_quote_url = "https://www.nseindia.com/get-quotes/equity?symbol={code}"
         self.stocks_csv_url = 'http://www1.nseindia.com/content/equities/EQUITY_L.csv'
         self.top_gainer_url = 'http://www1.nseindia.com/live_market/dynaContent/live_analysis/gainers/niftyGainers1.json'
