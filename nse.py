@@ -44,10 +44,10 @@ class Nse(AbstractBaseExchange):
     """
     __CODECACHE__ = None
 
-    def __init__(self, session: Optional[requests.Session] = None, session_refresh_interval: int = 300):
+    def __init__(self, verify: bool = True, session_refresh_interval: int = 300):
         # URL list
         self.session_refresh_interval = session_refresh_interval 
-        self.session = session or self.create_session()
+        self.session = self.create_session(verify = verify)
         
         self.get_quote_url = "https://www.nseindia.com/get-quotes/equity?symbol={code}"
         self.stocks_csv_url = 'http://www1.nseindia.com/content/equities/EQUITY_L.csv'
@@ -371,9 +371,10 @@ class Nse(AbstractBaseExchange):
         """returns index copy file"""
         pass
 
-    def create_session(self):
+    def create_session(self, verify = True):
         home_url = "https://nseindia.com"
         self._session = requests.Session()
+        self._session.verify = verify
         self._session.headers.update(self.nse_headers())
         self._session.get(home_url)
         self._session_init_time = dt.now()
