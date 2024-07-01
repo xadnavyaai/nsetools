@@ -28,6 +28,7 @@ import json
 import zipfile
 import io
 import requests
+from typing import Optional
 from dateutil import parser
 from datetime import datetime as dt 
 from nsetools.bases import AbstractBaseExchange
